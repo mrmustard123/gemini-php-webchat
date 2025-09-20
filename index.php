@@ -41,8 +41,8 @@
   <script>
     // Config
     //const endpoint = 'chat-php-without-curl.php';
-    //const endpoint = 'chat.php';
-   const endpoint = 'chat-php-fixed-final.php'; 
+    const endpoint = 'chat.php';
+    //const endpoint = 'chat-php-fixed-final.php'; 
 
     // Estado local
     let history = [];

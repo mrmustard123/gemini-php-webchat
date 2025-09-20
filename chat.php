@@ -1,29 +1,26 @@
 <?php
-
 /*
-File: chat
+File: chat.php - Versión final corregida
 Author: Leonardo G. Tellez Saucedo
-Created on: 19 sep. de 2025 17:55:22
-Email: leonardo616@gmail.com
 */
 
+// Desactivar warnings para evitar que contaminen la salida JSON
+error_reporting(E_ERROR | E_PARSE);
+ini_set('display_errors', 0);
+
+// Iniciar output buffering limpio
+if (ob_get_level()) {
+    ob_end_clean();
+}
+ob_start();
 
 require __DIR__ . '/vendor/autoload.php';
 
 $dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
 $dotenv->load();
 
-// Debug: Verificar variables de entorno
-error_log("=== DEBUG INICIO ===");
-error_log("ENV GEMINI_API_KEY existe: " . (isset($_ENV['GEMINI_API_KEY']) ? 'SI' : 'NO'));
-
 $apiKey = $_ENV['GEMINI_API_KEY'] ?? 'AIzaSyCAxhyvtBN6tnPOD6oHZtEm1jj7rRqoWHU';
-$model = $_ENV['MODEL'] ?? 'gemini-2.0-flash'; // Actualizado al modelo más nuevo
-
-// Debug: Verificar valores finales
-error_log("API Key length: " . strlen($apiKey));
-error_log("API Key (últimos 6 chars): ..." . substr($apiKey, -6));
-error_log("Model: " . $model);
+$model = $_ENV['MODEL'] ?? 'gemini-2.0-flash';
 
 $sessionFile = __DIR__ . '/chat_session.json';
 
@@ -35,203 +32,199 @@ header('Access-Control-Allow-Headers: Content-Type');
 function loadHistory($file) {
     if (file_exists($file)) {
         $data = json_decode(file_get_contents($file), true);
-        return $data ?: [];
+        // Asegurar que siempre devolvamos un array, no un objeto
+        if (is_array($data) && isset($data['history']) && is_array($data['history'])) {
+            return $data['history'];
+        } elseif (is_array($data)) {
+            // Si data es directamente el array de historia
+            return array_values($data); // Reindexar para asegurar array numérico
+        }
     }
     return [];
 }
 
 function saveHistory($file, $history) {
-    file_put_contents($file, json_encode($history, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    // Guardar solo el array de historia, no envuelto en otro objeto
+    $data = ['history' => array_values($history)]; // array_values para reindexar
+    file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+// Función para hacer petición HTTP sin cURL (con SSL corregido)
+function makeHttpRequest($url, $data, $headers) {
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => implode("\r\n", $headers) . "\r\n",
+            'content' => $data,
+            'timeout' => 30,
+            'ignore_errors' => true
+        ],
+        'ssl' => [
+            'verify_peer' => false,      // ¡Deshabilitar verificación SSL para desarrollo local!
+            'verify_peer_name' => false,
+            'allow_self_signed' => true,
+        ]
+    ]);
+
+    $response = @file_get_contents($url, false, $context);
+    
+    if ($response === false) {
+        // Si falla, intentar obtener más información del error
+        $error = error_get_last();
+        throw new Exception('HTTP request failed: ' . ($error['message'] ?? 'Unknown error'));
+    }
+    
+    // Obtener código de respuesta HTTP
+    $httpCode = 200;
+    if (isset($http_response_header)) {
+        foreach ($http_response_header as $header) {
+            if (preg_match('/HTTP\/\d\.\d\s+(\d+)/', $header, $matches)) {
+                $httpCode = intval($matches[1]);
+                break;
+            }
+        }
+    }
+    
+    return [
+        'response' => $response,
+        'http_code' => $httpCode,
+        'headers' => $http_response_header ?? []
+    ];
 }
 
 // Manejo de OPTIONS para CORS
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    ob_end_clean();
     http_response_code(200);
     exit;
 }
 
 // Manejo de GET: devolver historial
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    ob_end_clean(); // Limpiar buffer
     $history = loadHistory($sessionFile);
-    echo json_encode(['history' => $history]);
+    echo json_encode(['history' => $history], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 // Manejo de POST: enviar mensaje al modelo y actualizar historial
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    error_log("=== POST REQUEST INICIADO ===");
-    
-    $rawInput = file_get_contents('php://input');
-    error_log("Raw input: " . $rawInput);
-    
-    $input = json_decode($rawInput, true);
-    
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        $error = 'JSON inválido: ' . json_last_error_msg();
-        error_log("ERROR: " . $error);
-        echo json_encode(['error' => $error]);
-        exit;
-    }
-    
-    $message = trim($input['message'] ?? '');
-    error_log("Mensaje recibido: " . $message);
-
-    if ($message === '') {
-        echo json_encode(['error' => 'Mensaje vacío']);
-        exit;
-    }
-
-    // Cargar historial
-    $history = loadHistory($sessionFile);
-    error_log("Historial cargado. Items: " . count($history));
-
-    // Convertir historial al formato esperado por Gemini 2.0
-    $geminiContents = [];
-    foreach ($history as $turn) {
-        if ($turn['role'] === 'user') {
-            $geminiContents[] = [
-                'parts' => [['text' => $turn['parts'][0]['text']]]
-            ];
-        } elseif ($turn['role'] === 'model') {
-            $geminiContents[] = [
-                'parts' => [['text' => $turn['parts'][0]['text']]]
-            ];
-        }
-    }
-
-    // Añadir el mensaje del usuario actual
-    $geminiContents[] = [
-        'parts' => [['text' => $message]]
-    ];
-
-    // Preparar payload para Gemini 2.0 (estructura simplificada)
-    $payload = [
-        'contents' => $geminiContents
-    ];
-    
-    error_log("Payload preparado: " . json_encode($payload, JSON_PRETTY_PRINT));
-
-    // Nueva URL sin API key (va en header)
-    $url_gemini = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent";
-    error_log("URL Gemini: " . $url_gemini);
-
-    // Llamada HTTP con nueva autenticación
-    $ch = curl_init($url_gemini);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        'Content-Type: application/json',
-        'X-goog-api-key: ' . $apiKey,  // ¡Nueva forma de autenticación!
-        'User-Agent: PHP-Gemini-Client/2.0'
-    ]);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
-    
-    // Para debugging detallado
-    if (isset($_GET['verbose'])) {
-        curl_setopt($ch, CURLOPT_VERBOSE, true);
-        $verboseLog = fopen('php://temp', 'w+');
-        curl_setopt($ch, CURLOPT_STDERR, $verboseLog);
-    }
-
-    error_log("=== INICIANDO CURL ===");
-    $response = curl_exec($ch);
-    
-    // Obtener información de cURL
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    
-    if (isset($verboseLog)) {
-        rewind($verboseLog);
-        $verboseOutput = stream_get_contents($verboseLog);
-        fclose($verboseLog);
-        error_log("Verbose output: " . $verboseOutput);
-    }
-    
-    curl_close($ch);
-
-    // Log de debugging
-    error_log("HTTP Code: " . $httpCode);
-    error_log("cURL Error: " . ($curlError ?: 'Ninguno'));
-    error_log("Response length: " . strlen($response));
-    error_log("Response (first 1000 chars): " . substr($response, 0, 1000));
-
-    if ($curlError) {
-        echo json_encode(['error' => 'Error de conexión: ' . $curlError]);
-        exit;
-    }
-
-    if ($httpCode !== 200) {
-        error_log("ERROR HTTP: " . $httpCode);
-        error_log("Response completa: " . $response);
+    try {
+        $rawInput = file_get_contents('php://input');
+        $input = json_decode($rawInput, true);
         
-        // Intentar parsear el error de Gemini
-        $errorData = json_decode($response, true);
-        if ($errorData && isset($errorData['error'])) {
-            $errorMsg = $errorData['error']['message'] ?? 'Error desconocido de Gemini';
-            $errorCode = $errorData['error']['code'] ?? $httpCode;
-            echo json_encode([
-                'error' => "Gemini API Error ($errorCode): $errorMsg",
-                'details' => $errorData
-            ]);
-        } else {
-            echo json_encode(['error' => "HTTP $httpCode: $response"]);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception('JSON inválido: ' . json_last_error_msg());
         }
-        exit;
-    }
+        
+        $message = trim($input['message'] ?? '');
 
-    $result = json_decode($response, true);
-    
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        error_log("ERROR: JSON de respuesta inválido");
-        echo json_encode(['error' => 'Respuesta JSON inválida de Gemini']);
-        exit;
-    }
+        if ($message === '') {
+            throw new Exception('Mensaje vacío');
+        }
 
-    error_log("Respuesta parseada: " . print_r($result, true));
+        // Cargar historial
+        $history = loadHistory($sessionFile);
 
-    // Verificar estructura de respuesta
-    if (!isset($result['candidates'][0]['content']['parts'][0]['text'])) {
-        error_log("ERROR: Estructura de respuesta inesperada");
-        error_log("Estructura recibida: " . print_r($result, true));
+        // Convertir historial al formato esperado por Gemini 2.0
+        $geminiContents = [];
+        
+        if (is_array($history)) {
+            foreach ($history as $turn) {
+                // Verificar que el turn tenga la estructura correcta
+                if (is_array($turn) && 
+                    isset($turn['role']) && 
+                    isset($turn['parts']) && 
+                    is_array($turn['parts']) && 
+                    isset($turn['parts'][0]['text'])) {
+                    
+                    $geminiContents[] = [
+                        'role' => $turn['role'],  // ¡Incluir el role!
+                        'parts' => [['text' => $turn['parts'][0]['text']]]
+                    ];
+                }
+            }
+        }
+
+        // Añadir el mensaje del usuario actual
+        $geminiContents[] = [
+            'role' => 'user',  // ¡Incluir el role!
+            'parts' => [['text' => $message]]
+        ];
+
+        // Preparar payload para Gemini
+        $payload = [
+            'contents' => $geminiContents
+        ];
+        
+        $url_gemini = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent";
+        $jsonPayload = json_encode($payload);
+        
+        $headers = [
+            'Content-Type: application/json',
+            'X-goog-api-key: ' . $apiKey,
+            'User-Agent: PHP-Gemini-Client/2.0'
+        ];
+
+        $result = makeHttpRequest($url_gemini, $jsonPayload, $headers);
+
+        if ($result['http_code'] !== 200) {
+            // Intentar parsear el error de Gemini
+            $errorData = json_decode($result['response'], true);
+            if ($errorData && isset($errorData['error'])) {
+                $errorMsg = $errorData['error']['message'] ?? 'Error desconocido de Gemini';
+                $errorCode = $errorData['error']['code'] ?? $result['http_code'];
+                throw new Exception("Gemini API Error ($errorCode): $errorMsg");
+            } else {
+                throw new Exception("HTTP {$result['http_code']}: {$result['response']}");
+            }
+        }
+
+        $responseData = json_decode($result['response'], true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception('Respuesta JSON inválida de Gemini');
+        }
+
+        // Verificar estructura de respuesta
+        if (!isset($responseData['candidates'][0]['content']['parts'][0]['text'])) {
+            throw new Exception('Estructura de respuesta inesperada de Gemini');
+        }
+
+        $reply = $responseData['candidates'][0]['content']['parts'][0]['text'];
+
+        // Actualizar historial con estructura correcta
+        $userMessage = [
+            'role' => 'user',
+            'parts' => [['text' => $message]]
+        ];
+        $modelMessage = [
+            'role' => 'model',
+            'parts' => [['text' => $reply]]
+        ];
+        
+        $history[] = $userMessage;
+        $history[] = $modelMessage;
+
+        // Guardar historial
+        saveHistory($sessionFile, $history);
+
+        // Limpiar buffer y enviar respuesta
+        ob_end_clean();
         echo json_encode([
-            'error' => 'Estructura de respuesta inesperada de Gemini',
-            'response_structure' => $result
-        ]);
-        exit;
+            'reply' => $reply,
+            'history' => $history
+        ], JSON_UNESCAPED_UNICODE);
+        
+    } catch (Exception $e) {
+        ob_end_clean();
+        echo json_encode(['error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
-
-    $reply = $result['candidates'][0]['content']['parts'][0]['text'];
-    error_log("Respuesta obtenida: " . substr($reply, 0, 200) . "...");
-
-    // Actualizar historial con ambos mensajes (usuario y modelo)
-    $userMessage = [
-        'role' => 'user',
-        'parts' => [['text' => $message]]
-    ];
-    $modelMessage = [
-        'role' => 'model',
-        'parts' => [['text' => $reply]]
-    ];
-    
-    $history[] = $userMessage;
-    $history[] = $modelMessage;
-
-    // Guardar historial
-    saveHistory($sessionFile, $history);
-    error_log("Historial guardado. Total items: " . count($history));
-
-    echo json_encode([
-        'reply' => $reply,
-        'history' => $history
-    ]);
-    
-    error_log("=== POST REQUEST COMPLETADO ===");
     exit;
 }
 
 // Si no es GET ni POST
+ob_end_clean();
 http_response_code(405);
-echo json_encode(['error' => 'Método no permitido']);
+echo json_encode(['error' => 'Método no permitido'], JSON_UNESCAPED_UNICODE);
 ?>
