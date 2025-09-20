@@ -18,10 +18,14 @@ It provides a lightweight frontend for chat messages and a PHP backend that hand
 ## 📂 Project Structure
 
 /project-root
+
 ¦
 +-- index.php # Main chat UI (HTML + Tailwind + JS)
+
 +-- chat.php # PHP endpoint (receives messages, updates session)
+
 +-- chat_session.json # Stores conversation history
+
 +-- README.md # Project documentation
 
 ---
