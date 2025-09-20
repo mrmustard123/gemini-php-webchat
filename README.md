@@ -49,16 +49,16 @@ http://localhost/index.php
 
 ---
 
-## 🛠️ How It Works
+## 📌 How It Works
 
 1. **Frontend (`index.php`)**  
 - Displays a chat UI with message bubbles.  
 - Captures user input and sends it via `fetch()` (AJAX POST request) to `chat.php`.  
 
-2. **Backend (`chat-php-fixed-final.php`)**  
+2. **Backend (`chat.php`)**  
 - Reads the JSON body using:
   ```php
-  $input = json_decode(file_get_contents('php://input'), true);
+     $rawInput = file_get_contents('php://input');
   ```
 - Appends the user message to `chat_session.json`.  
 - Generates a placeholder assistant response (can be replaced with API call).  
