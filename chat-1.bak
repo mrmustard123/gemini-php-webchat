@@ -1,0 +1,102 @@
+<?php
+
+/*
+File: index
+Author: Leonardo G. Tellez Saucedo
+Created on: 19 sep. de 2025 16:15:17
+Email: leonardo616@gmail.com
+*/
+
+// index.php
+// PHP 8 backend para la interfaz de chat con Gemini API
+
+// Configuración
+
+require __DIR__ . '/vendor/autoload.php';
+
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
+$dotenv->load();
+
+$apiKey = $_ENV['GEMINI_API_KEY'] ?? 'AIzaSyCAxhyvtBN6tnPOD6oHZtEm1jj7rRqoWHU';
+$model = $_ENV['MODEL'] ?? 'gemini-2.5-flash';
+
+
+/*$apiKey = getenv('GEMINI_API_KEY') ?: 'AIzaSyCAxhyvtBN6tnPOD6oHZtEm1jj7rRqoWHU';
+$model = 'gemini-1.5-flash'; // Podés cambiar a otro modelo disponible */
+$sessionFile = __DIR__ . '/chat_session.json';
+
+header('Content-Type: application/json');
+
+// Función para cargar historial
+function loadHistory($file) {
+    if (file_exists($file)) {
+        $data = json_decode(file_get_contents($file), true);
+        return $data ?: [];
+    }
+    return [];
+}
+
+// Función para guardar historial
+function saveHistory($file, $history) {
+    file_put_contents($file, json_encode($history, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+// Manejo de GET: devolver historial
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    $history = loadHistory($sessionFile);
+    echo json_encode(['history' => $history]);
+    exit;
+}
+
+// Manejo de POST: enviar mensaje al modelo y actualizar historial
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $message = trim($input['message'] ?? '');
+
+    if ($message === '') {
+        echo json_encode(['error' => 'Mensaje vacío']);
+        exit;
+    }
+
+    // Cargar historial
+    $history = loadHistory($sessionFile);
+
+    // Añadir el mensaje del usuario
+    $history[] = ['role' => 'user', 'content' => $message];
+
+    // Preparar payload para la API de Gemini
+    $payload = [
+        'contents' => array_map(function ($msg) {
+            return [
+                'role' => $msg['role'],
+                'parts' => [['text' => $msg['content']]]
+            ];
+        }, $history)
+    ];
+
+    // Llamada HTTP a Gemini API
+    $ch = curl_init("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey");
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+
+    $response = curl_exec($ch);
+    curl_close($ch);
+
+    $result = json_decode($response, true);
+    $reply = $result['candidates'][0]['content']['parts'][0]['text'] ?? '(No hubo respuesta)';
+
+    // Añadir respuesta del modelo al historial
+    $history[] = ['role' => 'model', 'content' => $reply];
+
+    // Guardar historial
+    saveHistory($sessionFile, $history);
+
+    echo json_encode(['reply' => $reply, 'history' => $history]);
+    exit;
+}
+
+// Si no es GET ni POST
+http_response_code(405);
+echo json_encode(['error' => 'Método no permitido']);

@@ -1,0 +1,225 @@
+<?php
+/*
+File: chat.php - Versión sin cURL (backup)
+Author: Leonardo G. Tellez Saucedo
+*/
+
+require __DIR__ . '/vendor/autoload.php';
+
+// Iniciar output buffering para controlar la salida
+ob_start();
+
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
+$dotenv->load();
+
+$apiKey = $_ENV['GEMINI_API_KEY'] ?? 'AIzaSyCAxhyvtBN6tnPOD6oHZtEm1jj7rRqoWHU';
+$model = $_ENV['MODEL'] ?? 'gemini-2.0-flash';
+
+$sessionFile = __DIR__ . '/chat_session.json';
+
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+
+function loadHistory($file) {
+    if (file_exists($file)) {
+        $data = json_decode(file_get_contents($file), true);
+        return $data ?: [];
+    }
+    return [];
+}
+
+function saveHistory($file, $history) {
+    file_put_contents($file, json_encode($history, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+// Función para hacer petición HTTP sin cURL
+function makeHttpRequest($url, $data, $headers) {
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => implode("\r\n", $headers) . "\r\n",
+            'content' => $data,
+            'timeout' => 30,
+            'ignore_errors' => true // Para capturar errores HTTP
+        ],
+        'ssl' => [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+        ]
+    ]);
+
+    $response = file_get_contents($url, false, $context);
+    
+    // Obtener código de respuesta HTTP
+    $httpCode = 200;
+    if (isset($http_response_header)) {
+        foreach ($http_response_header as $header) {
+            if (preg_match('/HTTP\/\d\.\d\s+(\d+)/', $header, $matches)) {
+                $httpCode = intval($matches[1]);
+                break;
+            }
+        }
+    }
+    
+    return [
+        'response' => $response,
+        'http_code' => $httpCode,
+        'headers' => $http_response_header ?? []
+    ];
+}
+
+// Manejo de OPTIONS para CORS
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+// Manejo de GET: devolver historial
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    $history = loadHistory($sessionFile);
+    echo json_encode(['history' => $history]);
+    exit;
+}
+
+// Manejo de POST: enviar mensaje al modelo y actualizar historial
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Limpiar cualquier salida previa
+    ob_clean();
+    
+    error_log("=== POST REQUEST INICIADO (sin cURL) ===");
+    
+    $rawInput = file_get_contents('php://input');
+    $input = json_decode($rawInput, true);
+    
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        $error = 'JSON inválido: ' . json_last_error_msg();
+        error_log("ERROR: " . $error);
+        echo json_encode(['error' => $error]);
+        exit;
+    }
+    
+    $message = trim($input['message'] ?? '');
+
+    if ($message === '') {
+        echo json_encode(['error' => 'Mensaje vacío']);
+        exit;
+    }
+
+    // Cargar historial
+    $history = loadHistory($sessionFile);
+
+    // Convertir historial al formato esperado por Gemini 2.0
+    $geminiContents = [];
+    foreach ($history as $turn) {
+        // Verificar que el turn tenga la estructura correcta
+        if (isset($turn['role']) && isset($turn['parts'][0]['text'])) {
+            if ($turn['role'] === 'user') {
+                $geminiContents[] = [
+                    'parts' => [['text' => $turn['parts'][0]['text']]]
+                ];
+            } elseif ($turn['role'] === 'model') {
+                $geminiContents[] = [
+                    'parts' => [['text' => $turn['parts'][0]['text']]]
+                ];
+            }
+        }
+    }
+
+    // Añadir el mensaje del usuario actual
+    $geminiContents[] = [
+        'parts' => [['text' => $message]]
+    ];
+
+    // Preparar payload para Gemini 2.0
+    $payload = [
+        'contents' => $geminiContents
+    ];
+    
+    $url_gemini = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent";
+    $jsonPayload = json_encode($payload);
+    
+    $headers = [
+        'Content-Type: application/json',
+        'X-goog-api-key: ' . $apiKey,
+        'User-Agent: PHP-Gemini-Client/2.0'
+    ];
+
+    error_log("=== INICIANDO PETICIÓN HTTP (file_get_contents) ===");
+    error_log("URL: " . $url_gemini);
+    error_log("Payload: " . $jsonPayload);
+    
+    $result = makeHttpRequest($url_gemini, $jsonPayload, $headers);
+    
+    error_log("HTTP Code: " . $result['http_code']);
+    error_log("Response length: " . strlen($result['response']));
+    error_log("Response: " . substr($result['response'], 0, 1000));
+
+    if ($result['http_code'] !== 200) {
+        error_log("ERROR HTTP: " . $result['http_code']);
+        
+        // Intentar parsear el error de Gemini
+        $errorData = json_decode($result['response'], true);
+        if ($errorData && isset($errorData['error'])) {
+            $errorMsg = $errorData['error']['message'] ?? 'Error desconocido de Gemini';
+            $errorCode = $errorData['error']['code'] ?? $result['http_code'];
+            echo json_encode([
+                'error' => "Gemini API Error ($errorCode): $errorMsg",
+                'details' => $errorData
+            ]);
+        } else {
+            echo json_encode(['error' => "HTTP {$result['http_code']}: {$result['response']}"]);
+        }
+        exit;
+    }
+
+    $responseData = json_decode($result['response'], true);
+    
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        error_log("ERROR: JSON de respuesta inválido");
+        echo json_encode(['error' => 'Respuesta JSON inválida de Gemini']);
+        exit;
+    }
+
+    // Verificar estructura de respuesta
+    if (!isset($responseData['candidates'][0]['content']['parts'][0]['text'])) {
+        error_log("ERROR: Estructura de respuesta inesperada");
+        echo json_encode([
+            'error' => 'Estructura de respuesta inesperada de Gemini',
+            'response_structure' => $responseData
+        ]);
+        exit;
+    }
+
+    $reply = $responseData['candidates'][0]['content']['parts'][0]['text'];
+
+    // Actualizar historial
+    $userMessage = [
+        'role' => 'user',
+        'parts' => [['text' => $message]]
+    ];
+    $modelMessage = [
+        'role' => 'model',
+        'parts' => [['text' => $reply]]
+    ];
+    
+    $history[] = $userMessage;
+    $history[] = $modelMessage;
+
+    // Guardar historial
+    saveHistory($sessionFile, $history);
+
+    echo json_encode([
+        'reply' => $reply,
+        'history' => $history
+    ], JSON_UNESCAPED_UNICODE);
+    
+    error_log("=== POST REQUEST COMPLETADO ===");
+    exit;
+}
+
+// Si no es GET ni POST
+http_response_code(405);
+echo json_encode(['error' => 'Método no permitido']);
+?>

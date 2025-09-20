@@ -1,0 +1,141 @@
+<?php
+/*
+File: chat.php
+Author: Leonardo G. Tellez Saucedo
+Created on: 19 sep. de 2025 16:15:17
+Email: leonardo616@gmail.com
+*/
+
+require __DIR__ . '/vendor/autoload.php';
+
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
+$dotenv->load();
+
+$apiKey = $_ENV['GEMINI_API_KEY'] ?? 'AIzaSyCAxhyvtBN6tnPOD6oHZtEm1jj7rRqoWHU';
+$model = $_ENV['MODEL'] ?? 'gemini-1.5-flash';
+$sessionFile = __DIR__ . '/chat_session.json';
+
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+
+// Función para cargar historial
+function loadHistory($file) {
+    if (file_exists($file)) {
+        $data = json_decode(file_get_contents($file), true);
+        return $data ?: [];
+    }
+    return [];
+}
+
+// Función para guardar historial
+function saveHistory($file, $history) {
+    file_put_contents($file, json_encode($history, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+// Manejo de OPTIONS para CORS
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+// Manejo de GET: devolver historial
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    $history = loadHistory($sessionFile);
+    echo json_encode(['history' => $history]);
+    exit;
+}
+
+// Manejo de POST: enviar mensaje al modelo y actualizar historial
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        echo json_encode(['error' => 'JSON inválido: ' . json_last_error_msg()]);
+        exit;
+    }
+    
+    $message = trim($input['message'] ?? '');
+
+    if ($message === '') {
+        echo json_encode(['error' => 'Mensaje vacío']);
+        exit;
+    }
+
+    // Cargar historial
+    $history = loadHistory($sessionFile);
+
+    // Añadir el mensaje del usuario (estructura consistente)
+    $userMessage = [
+        'role' => 'user',
+        'parts' => [['text' => $message]]
+    ];
+    $history[] = $userMessage;
+
+    // Preparar payload para la API de Gemini
+    $payload = [
+        'contents' => $history
+    ];
+
+    $url_gemini="https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey";
+    
+    // Llamada HTTP a Gemini API
+    $ch = curl_init($url_gemini);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlError) {
+        echo json_encode(['error' => 'Error de conexión: ' . $curlError]);
+        exit;
+    }
+
+    if ($httpCode !== 200) {
+        echo json_encode(['error' => 'Error HTTP ' . $httpCode . ': ' . $response]);
+        exit;
+    }
+
+    $result = json_decode($response, true);
+    
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        echo json_encode(['error' => 'Respuesta JSON inválida de Gemini']);
+        exit;
+    }
+
+    // Verificar estructura de respuesta
+    if (!isset($result['candidates'][0]['content']['parts'][0]['text'])) {
+        echo json_encode(['error' => 'Estructura de respuesta inesperada de Gemini']);
+        exit;
+    }
+
+    $reply = $result['candidates'][0]['content']['parts'][0]['text'];
+
+    // Añadir respuesta del modelo al historial (estructura consistente)
+    $modelMessage = [
+        'role' => 'model',
+        'parts' => [['text' => $reply]]
+    ];
+    $history[] = $modelMessage;
+
+    // Guardar historial
+    saveHistory($sessionFile, $history);
+
+    echo json_encode([
+        'reply' => $reply,
+        'history' => $history
+    ]);
+    exit;
+}
+
+// Si no es GET ni POST
+http_response_code(405);
+echo json_encode(['error' => 'Método no permitido']);
+?>

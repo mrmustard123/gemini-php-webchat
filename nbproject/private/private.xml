@@ -5,6 +5,7 @@
         <group>
             <file>file:/C:/wamp64/www/gemini-php/.env</file>
             <file>file:/C:/wamp64/www/gemini-php/index.php</file>
+            <file>file:/C:/wamp64/www/gemini-php/test-curl-php.php</file>
             <file>file:/C:/wamp64/www/gemini-php/chat_session.json</file>
             <file>file:/C:/wamp64/www/gemini-php/chat.php</file>
             <file>file:/C:/wamp64/www/gemini-php/composer.json</file>

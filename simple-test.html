@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Simple Chat</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .response { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffe6e6; border: 1px solid #ff0000; }
+        .success { background: #e6ffe6; border: 1px solid #00ff00; }
+        pre { white-space: pre-wrap; word-wrap: break-word; }
+    </style>
+</head>
+<body>
+    <h1>Test Simple del Chat</h1>
+    
+    <button onclick="testConnection()">Test Conexión</button>
+    <button onclick="sendMessage()">Enviar Mensaje</button>
+    <button onclick="clearLog()">Limpiar Log</button>
+    
+    <div id="log"></div>
+
+    <script>
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = 'response ' + type;
+            div.innerHTML = '<strong>' + new Date().toLocaleTimeString() + '</strong><br>' + message;
+            document.getElementById('log').appendChild(div);
+        }
+
+        async function testConnection() {
+            log('Probando conexión GET...');
+            try {
+                const response = await fetch('chat.php', {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+                
+                log('Status: ' + response.status + ' ' + response.statusText);
+                
+                const text = await response.text();
+                log('Raw response: <pre>' + text + '</pre>');
+                
+                try {
+                    const json = JSON.parse(text);
+                    log('Parsed JSON: <pre>' + JSON.stringify(json, null, 2) + '</pre>', 'success');
+                } catch (e) {
+                    log('JSON Parse Error: ' + e.message, 'error');
+                }
+                
+            } catch (error) {
+                log('Network Error: ' + error.message, 'error');
+            }
+        }
+
+        async function sendMessage() {
+            log('Enviando mensaje POST...');
+            try {
+                const response = await fetch('chat.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ message: 'Hola mundo' })
+                });
+                
+                log('Status: ' + response.status + ' ' + response.statusText);
+                
+                const text = await response.text();
+                log('Raw response length: ' + text.length);
+                log('First 500 chars: <pre>' + text.substring(0, 500) + '</pre>');
+                
+                // Verificar si hay caracteres no visibles al inicio
+                let cleanText = text;
+                for (let i = 0; i < text.length; i++) {
+                    const code = text.charCodeAt(i);
+                    if (code < 32 && code !== 10 && code !== 13) {
+                        log('Caracter invisible encontrado en posición ' + i + ': código ' + code, 'error');
+                        cleanText = text.substring(i + 1);
+                        break;
+                    }
+                    if (code >= 32 || code === 10 || code === 13) {
+                        if (i > 0) {
+                            log('Removiendo ' + i + ' caracteres del inicio', 'error');
+                            cleanText = text.substring(i);
+                        }
+                        break;
+                    }
+                }
+                
+                try {
+                    const json = JSON.parse(cleanText);
+                    log('✅ JSON parsed successfully: <pre>' + JSON.stringify(json, null, 2) + '</pre>', 'success');
+                } catch (e) {
+                    log('❌ JSON Parse Error: ' + e.message, 'error');
+                    log('Trying to clean text...');
+                    
+                    // Intentar limpiar caracteres problemáticos
+                    const cleaned = cleanText.replace(/^\uFEFF/, '').trim();
+                    try {
+                        const json2 = JSON.parse(cleaned);
+                        log('✅ Cleaned JSON parsed: <pre>' + JSON.stringify(json2, null, 2) + '</pre>', 'success');
+                    } catch (e2) {
+                        log('❌ Still failed after cleaning: ' + e2.message, 'error');
+                    }
+                }
+                
+            } catch (error) {
+                log('Network Error: ' + error.message, 'error');
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+    </script>
+</body>
+</html>
