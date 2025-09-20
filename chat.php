@@ -14,13 +14,21 @@ if (ob_get_level()) {
 }
 ob_start();
 
-require __DIR__ . '/vendor/autoload.php';
+// Cargar .env manualmente
+$envFile = __DIR__ . '/.env';
+if (file_exists($envFile)) {
+    $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        if (strpos(trim($line), '#') === 0) continue; // comentarios
+        list($name, $value) = array_map('trim', explode('=', $line, 2));
+        $_ENV[$name] = $value;
+        putenv("$name=$value"); // opcional
+    }
+}
 
-$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
-$dotenv->load();
+$apiKey = $_ENV['GEMINI_API_KEY'] ?? 'tu_api_key_por_defecto';
+$model  = $_ENV['MODEL'] ?? 'gemini-2.0-flash';
 
-$apiKey = $_ENV['GEMINI_API_KEY'] ?? 'AIzaSyCAxhyvtBN6tnPOD6oHZtEm1jj7rRqoWHU';
-$model = $_ENV['MODEL'] ?? 'gemini-2.0-flash';
 
 $sessionFile = __DIR__ . '/chat_session.json';
 
