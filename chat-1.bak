@@ -21,7 +21,7 @@ $apiKey = $_ENV['GEMINI_API_KEY'];
 $model = $_ENV['MODEL'] ?? 'gemini-2.5-flash';
 
 
-/*$apiKey = getenv('GEMINI_API_KEY') ?: 'AIzaSyCAxhyvtBN6tnPOD6oHZtEm1jj7rRqoWHU';
+/*$apiKey = getenv('GEMINI_API_KEY');
 $model = 'gemini-1.5-flash'; // Podés cambiar a otro modelo disponible */
 $sessionFile = __DIR__ . '/chat_session.json';
 
