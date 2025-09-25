@@ -26,7 +26,7 @@ if (file_exists($envFile)) {
     }
 }
 
-$apiKey = $_ENV['GEMINI_API_KEY'] ?? 'tu_api_key_por_defecto';
+$apiKey = $_ENV['GEMINI_API_KEY'];
 $model  = $_ENV['MODEL'] ?? 'gemini-2.0-flash';
 
 

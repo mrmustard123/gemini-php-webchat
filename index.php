@@ -12,7 +12,7 @@
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center p-6">
   <div class="w-full h-screen">
-    <div class="bg-white rounded-2xl shadow-lg overflow-hidden" style="height: 95vh;">>
+    <div class="bg-white rounded-2xl shadow-lg overflow-hidden" style="height: 95vh;">
       <header class="px-6 py-4 bg-gray-800 text-white text-center font-semibold">
         Gemini Webchat — PHP 8 backend
       </header>
