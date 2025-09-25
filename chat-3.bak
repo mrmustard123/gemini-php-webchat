@@ -17,7 +17,7 @@ $dotenv->load();
 error_log("=== DEBUG INICIO ===");
 error_log("ENV GEMINI_API_KEY existe: " . (isset($_ENV['GEMINI_API_KEY']) ? 'SI' : 'NO'));
 
-$apiKey = $_ENV['GEMINI_API_KEY'] ?? 'AIzaSyCAxhyvtBN6tnPOD6oHZtEm1jj7rRqoWHU';
+$apiKey = $_ENV['GEMINI_API_KEY'];
 $model = $_ENV['MODEL'] ?? 'gemini-2.0-flash'; // Actualizado al modelo más nuevo
 
 // Debug: Verificar valores finales

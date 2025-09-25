@@ -12,7 +12,7 @@ ob_start();
 $dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
 $dotenv->load();
 
-$apiKey = $_ENV['GEMINI_API_KEY'] ?? 'AIzaSyCAxhyvtBN6tnPOD6oHZtEm1jj7rRqoWHU';
+$apiKey = $_ENV['GEMINI_API_KEY'];
 $model = $_ENV['MODEL'] ?? 'gemini-2.0-flash';
 
 $sessionFile = __DIR__ . '/chat_session.json';
